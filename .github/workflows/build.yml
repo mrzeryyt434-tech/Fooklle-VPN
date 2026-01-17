@@ -1,6 +1,9 @@
 name: Build
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   workflow_call:
     inputs:
       upload-artifact:
@@ -15,46 +18,17 @@ on:
 
 env:
   IS_GITHUB_ACTIONS: 1
-  CHANNEL: "${{ inputs.channel }}"
+  CHANNEL: "${{ inputs.channel || 'dev' }}"
   FLUTTER_VERSION: '3.24.0'
   NDK_VERSION: r26d
-  UPLOAD_ARTIFACT: "${{ inputs.upload-artifact }}"
-  TAG_NAME: "${{ inputs.tag-name }}"
-  TARGET_NAME_AppImage: "Fooklle-Linux-x64"
-  TARGET_NAME_deb: "Fooklle-Debian-x64"
-  TARGET_NAME_rpm: "Fooklle-rpm-x64"
+  UPLOAD_ARTIFACT: "${{ inputs.upload-artifact || 'true' }}"
+  TAG_NAME: "${{ inputs.tag-name || 'draft' }}"
   TARGET_NAME_apk: "Fooklle-Android"
   TARGET_NAME_aab: "Fooklle-Android"
   TARGET_NAME_dmg: "Fooklle-MacOS"
-  TARGET_NAME_pkg: "Fooklle-MacOS-Installer"
-  TARGET_NAME_ipa: "Fooklle-iOS"
-  
 
 jobs:
-  test:
-    outputs:
-      draftBuildCode: ${{ steps.draftBuildCode.outputs.datetime }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: subosito/flutter-action@v2.16.0
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
-          cache: true
-          
-      - name: Prepare
-        run: make linux-prepare
-      - name: Test
-        run: flutter test
-
-      - name: make draftBuildCode
-        id: draftBuildCode
-        run: echo "::set-output name=datetime::$(date +'%d.%H.%M')"
-
-
   build:
-    needs: test
     permissions: write-all
     strategy:
       fail-fast: false
@@ -63,44 +37,11 @@ jobs:
           - platform: android-apk
             os: ubuntu-latest
             targets: apk
-
-          - platform: android-aab
-            os: ubuntu-latest
-            targets: aab
-
-          - platform: windows
-            os: windows-2019
-            aarch: amd64
-            targets: exe,msix
-
-          - platform: linux
-            os: ubuntu-22.04
-            aarch: amd64
-            targets: AppImage,deb,rpm
-
-          - platform: macos
-            os: macos-13
-            aarch: universal
-            targets: dmg,pkg
-            
     runs-on: ${{ matrix.os }}
     steps:
       - name: checkout
         uses: actions/checkout@v3
 
-      - name: Import Apple Codesign Certificates
-        if: ${{ inputs.upload-artifact && startsWith(matrix.os,'macos') }}
-        uses: apple-actions/import-codesign-certs@v3
-        with: 
-            p12-file-base64: "${{ secrets.APPLE_CERTIFICATE_P12 }}"
-            p12-password: "${{ secrets.APPLE_CERTIFICATE_P12_PASSWORD }}"
-
-      - name: Import Apple Mobile Provisioning Profile
-        if: ${{ inputs.upload-artifact && startsWith(matrix.os,'macos') }}
-        run: |
-           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-           echo "${{secrets.APPLE_MOBILE_PROVISIONING_PROFILES_TARGZ_BASE64}}"|base64 --decode | tar xz -C ~/Library/MobileDevice/Provisioning\ Profiles
-      
       - name: Setup Flutter
         uses: subosito/flutter-action@v2.16.0
         with:
@@ -114,76 +55,29 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: 17
+
       - name: Setup NDK
         if: startsWith(matrix.platform,'android')
         uses: nttld/setup-ndk@v1
-        id: setup-ndk
         with:
           ndk-version: ${{ env.NDK_VERSION }}
-          add-to-path: true
-          link-to-sdk: true
 
-      - name: Setup Gradle 8.1
-        if: startsWith(matrix.platform,'android')
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 7.5
       - name: Setup dependencies
         run: |
           make ${{ matrix.platform }}-install-dependencies
 
-      - name: Setup Android Signing Properties
-        if: ${{ inputs.upload-artifact && startsWith(matrix.platform,'android') }}
-        run: |
-          echo "${{ secrets.ANDROID_SIGNING_KEY }}" | base64 --decode > android/key.jks
-          echo "storeFile=$(pwd)/android/key.jks" > android/key.properties
-          echo "storePassword=${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}" >> android/key.properties
-          echo "keyPassword=${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}" >> android/key.properties
-          echo "keyAlias=${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}" >> android/key.properties
-
-      - name: Setup Windows Signing Properties
-        if: ${{ inputs.upload-artifact && startsWith(matrix.platform,'windows') }}
-        run: |
-            [IO.File]::WriteAllBytes("windows\sign.pfx", [Convert]::FromBase64String("${{ secrets.WINDOWS_SIGNING_KEY }}"))
-            (Get-Content "windows\packaging\msix\make_config.yaml") -replace '^certificate_password:.*$', 'certificate_password: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}' | Set-Content "windows\packaging\msix\make_config.yaml"
-
-      - name: Prepare for ${{ matrix.platform }}
+      - name: Build ${{ matrix.platform }}
         run: |
           make ${{ matrix.platform }}-prepare
-          tree
-      - name: Build ${{ matrix.platform }}
-        env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: |
           make ${{ matrix.platform }}-release
 
-      - name: Code Sign
-        if: ${{ inputs.upload-artifact && startsWith(matrix.platform,'windows') }}
-        uses: hiddify/signtool-code-sign-sha256@main
-        with:
-          certificate: '${{ secrets.WINDOWS_SIGNING_KEY }}'
-          cert-password: '${{ secrets.WINDOWS_SIGNING_PASSWORD }}'
-          cert-sha1: '${{ secrets.WINDOWS_SIGNING_SHA1 }}'
-          folder: 'dist'
-          timestamp-server: 'http://timestamp.digicert.com'
-          recursive: true
-          description: 'Fooklle VPN'
-
-      - name: Copy to out Windows
-        if: matrix.platform == 'windows'
-        run: |
-          .\scripts\package_windows.ps1
-          
       - name: Copy to out Android APK
         if: matrix.platform == 'android-apk'
         run: |
           mkdir out
-          cp ./build/app/outputs/flutter-apk/*arm64-v8a*.apk out/${TARGET_NAME_apk}-arm64.apk || echo "no arm64"
-          cp ./build/app/outputs/flutter-apk/*armeabi-v7a*.apk out/${TARGET_NAME_apk}-arm7.apk || echo "no arm7"
-          cp ./build/app/outputs/flutter-apk/app-release.apk out/${TARGET_NAME_apk}-universal.apk || echo "no universal"
+          cp ./build/app/outputs/flutter-apk/*arm64-v8a*.apk out/${TARGET_NAME_apk}-arm64.apk || cp ./build/app/outputs/flutter-apk/app-release.apk out/${TARGET_NAME_apk}-universal.apk
 
       - name: Upload Artifact
-        if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{matrix.platform}}
