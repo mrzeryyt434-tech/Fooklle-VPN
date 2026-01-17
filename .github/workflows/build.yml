@@ -2,6 +2,16 @@ name: Build
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      upload-artifact:
+        type: boolean
+        default: true
+      tag-name:
+        type: string
+        default: "draft"
+      channel:
+        type: string
+        default: "dev"
 
 jobs:
   build:
@@ -16,14 +26,12 @@ jobs:
           flutter-version: '3.24.0'
           channel: 'stable'
 
-      - name: Get Dependencies
-        run: |
-          flutter pub get || echo "Error but keep going"
+      - name: Get Deps
+        run: flutter pub get
         continue-on-error: true
 
       - name: Build APK
-        run: |
-          flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons
         continue-on-error: true
 
       - name: Upload APK
