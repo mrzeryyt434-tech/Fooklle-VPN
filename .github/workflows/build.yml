@@ -20,24 +20,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Java Setup
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2.16.0
         with:
           flutter-version: '3.24.0'
           channel: 'stable'
 
-      - name: Get Dependencies
-        run: flutter pub get
-
-      - name: Clean and Build APK
+      - name: Build APK
         run: |
-          flutter clean
           flutter pub get
-          flutter build apk --release --no-tree-shake-icons
+          export GRADLE_OPTS="-Xmx2048m"
+          flutter build apk --release --no-tree-shake-icons --split-per-abi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Fooklle-APK
           path: build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
