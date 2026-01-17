@@ -1,85 +1,26 @@
 name: Build
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  workflow_call:
-    inputs:
-      upload-artifact:
-        type: boolean
-        default: true
-      tag-name:
-        type: string
-        default: "draft"
-      channel:
-        type: string
-        default: "dev"
-
-env:
-  IS_GITHUB_ACTIONS: 1
-  CHANNEL: "${{ inputs.channel || 'dev' }}"
-  FLUTTER_VERSION: '3.24.0'
-  NDK_VERSION: r26d
-  UPLOAD_ARTIFACT: "${{ inputs.upload-artifact || 'true' }}"
-  TAG_NAME: "${{ inputs.tag-name || 'draft' }}"
-  TARGET_NAME_apk: "Fooklle-Android"
-  TARGET_NAME_aab: "Fooklle-Android"
-  TARGET_NAME_dmg: "Fooklle-MacOS"
 
 jobs:
-  build:
-    permissions: write-all
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: android-apk
-            os: ubuntu-latest
-            targets: apk
-    runs-on: ${{ matrix.os }}
+  android:
+    runs-on: ubuntu-latest
     steps:
-      - name: checkout
-        uses: actions/checkout@v3
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2.16.0
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2.16.0
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: '3.24.0'
           channel: 'stable'
           cache: true
-
-      - name: Setup Java
-        if: startsWith(matrix.platform,'android')
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: 17
-
-      - name: Setup NDK
-        if: startsWith(matrix.platform,'android')
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-
-      - name: Setup dependencies
+      - name: Install Dependencies
         run: |
-          make ${{ matrix.platform }}-install-dependencies
-
-      - name: Build ${{ matrix.platform }}
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev
+      - name: Build APK
         run: |
-          make ${{ matrix.platform }}-prepare
-          make ${{ matrix.platform }}-release
-
-      - name: Copy to out Android APK
-        if: matrix.platform == 'android-apk'
-        run: |
-          mkdir out
-          cp ./build/app/outputs/flutter-apk/*arm64-v8a*.apk out/${TARGET_NAME_apk}-arm64.apk || cp ./build/app/outputs/flutter-apk/app-release.apk out/${TARGET_NAME_apk}-universal.apk
-
+          flutter build apk --split-per-abi
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{matrix.platform}}
-          path: ./out
-          retention-days: 1
+          name: Fooklle-Release
+          path: build/app/outputs/flutter-apk/*.apk
