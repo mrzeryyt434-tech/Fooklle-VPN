@@ -1,6 +1,7 @@
 name: Build
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:
@@ -26,3 +27,4 @@ jobs:
         with:
           name: Fooklle-APK
           path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
